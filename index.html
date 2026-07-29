@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>DRAW!</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="icon" href="pict/ic.png" type="image/png" sizes="32x32">
+</head>
+<body>
+    <div id="toolbar">
+        <div class="toolbar-section tools-section">
+            <span class="section-label">TOOLS</span>
+            <div class="tool-buttons">
+                <button class="tool-btn active" data-tool="brush" title="Brush">BRUSH</button>
+                <button class="tool-btn" data-tool="eraser" title="Eraser">ERASER</button>
+                <button class="tool-btn" data-tool="fill" title="Fill">FILL</button>
+            </div>
+        </div>
+
+        <div class="toolbar-section color-section">
+            <span class="section-label">COLOR</span>
+            <div class="color-palette" id="colorPalette"></div>
+            <div class="rgb-inputs">
+                <label>R:<input type="number" id="rInput" min="0" max="255" value="0"></label>
+                <label>G:<input type="number" id="gInput" min="0" max="255" value="0"></label>
+                <label>B:<input type="number" id="bInput" min="0" max="255" value="0"></label>
+            </div>
+            <div class="color-preview" id="colorPreview"></div>
+        </div>
+
+        <div class="toolbar-section size-section">
+            <span class="section-label">SIZE</span>
+            <input type="range" id="sizeSlider" min="1" max="50" value="5">
+            <input type="number" id="sizeInput" min="1" max="50" value="5">
+            <div class="size-preview-wrapper">
+                <div class="size-preview" id="sizePreview"></div>
+            </div>
+        </div>
+
+        <div class="toolbar-section actions-section">
+            <button class="action-btn" id="clearBtn">CLEAR</button>
+            <button class="action-btn ai-btn" id="aiBtn">AI FUNCTION</button>
+        </div>
+
+        <div class="logo-wrapper" id="logoWrapper">
+            <div class="logo-icon" id="logoIcon"></div>
+            <div class="settings-panel hidden" id="settingsPanel">
+                <div class="settings-titlebar">
+                    <span>SETTINGS</span>
+                    <button class="settings-close-btn" id="settingsCloseBtn">X</button>
+                </div>
+                <div class="settings-body">
+                    <div class="settings-label">THEME</div>
+                    <button class="settings-theme-btn active" data-theme="classic">Classic</button>
+                    <button class="settings-theme-btn" data-theme="modern">Modern</button>
+                    <button class="settings-theme-btn" data-theme="summer">Summer</button>
+                    <button class="settings-help-btn" id="settingsHelpBtn">HELP</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="ai-toolbar" class="hidden">
+        <div class="toolbar-section">
+            <span class="section-label">AI TOOLS</span>
+            <div class="ai-tool-buttons">
+                <button class="action-btn ai-tool-btn" id="aiAutoColor">AUTO-COLOR</button>
+                <button class="action-btn ai-tool-btn" id="aiFinish">FINISH DRAWING</button>
+                <button class="action-btn ai-tool-btn" id="aiTextDraw">TEXT TO DRAW</button>
+            </div>
+        </div>
+
+        <div class="toolbar-section ai-style-section">
+            <span class="section-label">STYLE</span>
+            <select id="styleSelect" class="ai-select">
+                <option value="oil-painting">Oil Painting</option>
+                <option value="watercolor">Watercolor</option>
+                <option value="pixel-art">Pixel Art</option>
+                <option value="comic">Comic</option>
+                <option value="sketch">Pencil Sketch</option>
+                <option value="ukiyo-e">Ukiyo-e</option>
+            </select>
+            <button class="action-btn ai-tool-btn" id="aiStyleTransfer">TRANSFER!</button>
+        </div>
+
+        <div class="toolbar-section ai-input-section">
+            <span class="section-label">PROMPT</span>
+            <input type="text" id="aiPromptInput" class="ai-text-input" placeholder="Describe what to draw...">
+        </div>
+
+        <div class="toolbar-section actions-section">
+            <button class="action-btn ai-btn" id="aiBackBtn">BACK TO DRAW</button>
+        </div>
+    </div>
+
+    <div id="ai-loading-overlay" class="hidden">
+        <div class="ai-loading-box">
+            <div class="ai-spinner"></div>
+            <p class="ai-loading-text" id="aiLoadingText">Working...</p>
+        </div>
+    </div>
+
+    <div id="main-area">
+        <div id="sidebar">
+            <span class="sidebar-label">TOOLS</span>
+            <button class="sidebar-btn active" data-tool="brush" title="Brush">BRUSH</button>
+            <button class="sidebar-btn" data-tool="eraser" title="Eraser">ERASER</button>
+            <button class="sidebar-btn" data-tool="fill" title="Fill">FILL</button>
+            <button class="sidebar-btn" data-tool="blur" title="Blur Brush">BLUR</button>
+
+            <span class="sidebar-label">HISTORY</span>
+            <button class="sidebar-btn sidebar-btn-yellow" id="undoBtn" title="Undo">UNDO</button>
+            <button class="sidebar-btn sidebar-btn-yellow" id="redoBtn" title="Redo">REDO</button>
+
+            <span class="sidebar-label">FILE</span>
+            <button class="sidebar-btn sidebar-btn-green" id="saveBtn" title="Save as PNG">SAVE</button>
+            <button class="sidebar-btn sidebar-btn-blue" id="importBtn" title="Import Image">IMPORT</button>
+
+            <span class="sidebar-label">PROCESS</span>
+            <button class="sidebar-btn sidebar-btn-orange" id="extractBtn" title="Extract Lines">EXTRACT</button>
+            <button class="sidebar-btn sidebar-btn-purple" id="filterBtn" title="Convolution Filters">FILTER</button>
+            <button class="sidebar-btn sidebar-btn-cyan" id="pixelMathBtn" title="Pixel Math f(x)">f(x)</button>
+
+            <button class="sidebar-btn sidebar-btn-confirm hidden" id="confirmImportBtn">CONFIRM</button>
+            <button class="sidebar-btn sidebar-btn-cancel hidden" id="cancelImportBtn">CANCEL</button>
+        </div>
+        <div id="canvas-container">
+            <canvas id="drawCanvas"></canvas>
+        </div>
+    </div>
+
+    <script type="module" src="js/app.js"></script>
+</body>
+</html>
