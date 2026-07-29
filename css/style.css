@@ -25,6 +25,53 @@
     box-sizing: border-box;
 }
 
+/* ========== START SCREEN ========== */
+#startScreen {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: url('../pict/bg.png') center/cover no-repeat;
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding-left: 20%;
+    z-index: 99999;
+}
+
+#startScreen.fade-out {
+    opacity: 0;
+    transition: opacity 0.6s ease-out;
+    pointer-events: none;
+}
+
+#startBtn {
+    font-family: 'BoldsPixels', monospace;
+    font-size: 72px;
+    padding: 30px 80px;
+    background: #cc0000;
+    color: #fff;
+    border: 4px solid;
+    border-color: #ff4040 #800000 #800000 #ff4040;
+    cursor: pointer;
+    text-shadow: 3px 3px 0 #600000;
+    opacity: 0;
+    animation: btnFadeIn 1.2s ease-out 0.3s forwards;
+}
+
+#startBtn:hover {
+    background: #ee0000;
+    border-color: #ff6060 #990000 #990000 #ff6060;
+}
+
+#startBtn:active {
+    border-color: #800000 #ff4040 #ff4040 #800000;
+    background: #aa0000;
+}
+
+@keyframes btnFadeIn {
+    0% { opacity: 0; transform: scale(0.8); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
 /* ========== CSS VARIABLES (Classic theme default) ========== */
 :root {
     --bg-body: #008080;
@@ -968,6 +1015,102 @@ body {
 
 .settings-help-btn:hover {
     background: #5090ff;
+}
+
+.settings-volume-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.settings-volume-row input[type="range"] {
+    flex: 1;
+    accent-color: #000080;
+}
+
+.settings-volume-row span {
+    font-family: 'MisterPixel', monospace;
+    font-size: 13px;
+    color: var(--text-color);
+    min-width: 32px;
+    text-align: right;
+}
+
+.settings-about-btn {
+    font-family: 'BoldsPixels', monospace;
+    font-size: 14px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    width: 100%;
+    background: #c8a030;
+    border: 2px solid;
+    border-color: #e0c060 #806020 #806020 #e0c060;
+    color: #fff;
+    cursor: pointer;
+    text-align: center;
+}
+
+.settings-about-btn:hover {
+    background: #d8b040;
+}
+
+#aboutOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+#aboutDialog {
+    background: #f5e6b8;
+    border: 2px solid;
+    border-color: #ffe0a0 #8b6914 #8b6914 #ffe0a0;
+    max-width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.about-titlebar {
+    background: #a07020;
+    color: #fff8e0;
+    font-family: 'BoldsPixels', monospace;
+    font-size: 16px;
+    padding: 4px 8px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.about-close-btn {
+    font-family: 'BoldsPixels', monospace;
+    font-size: 14px;
+    background: #e0c060;
+    border: 2px solid;
+    border-color: #ffe0a0 #806020 #806020 #ffe0a0;
+    color: #4a3000;
+    cursor: pointer;
+    padding: 0 6px;
+    line-height: 1.2;
+}
+
+.about-close-btn:hover {
+    background: #f0d080;
+}
+
+.about-body {
+    padding: 12px;
+    overflow: auto;
+}
+
+.about-body img {
+    display: block;
+    max-width: 100%;
+    height: auto;
 }
 
 /* ========== HELP DIALOG ========== */

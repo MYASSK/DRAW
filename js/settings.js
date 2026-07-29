@@ -1,5 +1,7 @@
 // settings.js — Logo interaction and theme switching
 
+import { setBGMVolume } from './bgm.js';
+
 export function initSettings() {
     const logoIcon = document.getElementById('logoIcon');
     const panel = document.getElementById('settingsPanel');
@@ -40,6 +42,20 @@ export function initSettings() {
     // Help button
     document.getElementById('settingsHelpBtn').addEventListener('click', () => {
         openHelpDialog();
+    });
+
+    // BGM volume slider
+    const volumeSlider = document.getElementById('bgmVolumeSlider');
+    const volumeValue = document.getElementById('bgmVolumeValue');
+    volumeSlider.addEventListener('input', () => {
+        const vol = parseInt(volumeSlider.value);
+        volumeValue.textContent = vol + '%';
+        setBGMVolume(vol / 100);
+    });
+
+    // About button
+    document.getElementById('settingsAboutBtn').addEventListener('click', () => {
+        openAboutDialog();
     });
 }
 
@@ -145,6 +161,42 @@ function openHelpDialog() {
 <p>点击右上角Logo打开设置，可切换三种界面主题：Classic / Modern / Summer</p>
     `;
     dialog.appendChild(body);
+    overlay.appendChild(dialog);
+
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+
+    document.body.appendChild(overlay);
+}
+
+function openAboutDialog() {
+    if (document.getElementById('aboutOverlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'aboutOverlay';
+
+    const dialog = document.createElement('div');
+    dialog.id = 'aboutDialog';
+
+    const titleBar = document.createElement('div');
+    titleBar.className = 'about-titlebar';
+    titleBar.innerHTML = '<span>ABOUT</span>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'about-close-btn';
+    closeBtn.textContent = 'X';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    titleBar.appendChild(closeBtn);
+    dialog.appendChild(titleBar);
+
+    const body = document.createElement('div');
+    body.className = 'about-body';
+    const img = document.createElement('img');
+    img.src = 'pict/about.png';
+    img.alt = 'About DRAW!';
+    body.appendChild(img);
+    dialog.appendChild(body);
+
     overlay.appendChild(dialog);
 
     overlay.addEventListener('click', (e) => {

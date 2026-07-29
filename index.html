@@ -8,6 +8,10 @@
     <link rel="icon" href="pict/ic.png" type="image/png" sizes="32x32">
 </head>
 <body>
+    <div id="startScreen">
+        <button id="startBtn">START</button>
+    </div>
+
     <div id="toolbar">
         <div class="toolbar-section tools-section">
             <span class="section-label">TOOLS</span>
@@ -55,7 +59,13 @@
                     <button class="settings-theme-btn active" data-theme="classic">Classic</button>
                     <button class="settings-theme-btn" data-theme="modern">Modern</button>
                     <button class="settings-theme-btn" data-theme="summer">Summer</button>
+                    <div class="settings-label">BGM VOLUME</div>
+                    <div class="settings-volume-row">
+                        <input type="range" id="bgmVolumeSlider" min="0" max="100" value="50">
+                        <span id="bgmVolumeValue">50%</span>
+                    </div>
                     <button class="settings-help-btn" id="settingsHelpBtn">HELP</button>
+                    <button class="settings-about-btn" id="settingsAboutBtn">ABOUT</button>
                 </div>
             </div>
         </div>
