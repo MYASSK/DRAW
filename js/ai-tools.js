@@ -1,10 +1,11 @@
 // ai-tools.js — AI tool implementations: Auto-Color, Finish Drawing, Text to Drawing, Style Transfer
 
 import { visionAnalyze, generateImage, deepseekChat } from './ai-api.js';
-import { getCanvasBase64, loadImageToCanvas, getCanvasSize } from './canvas.js';
+import { getCanvasBase64, loadImageToCanvas, getCanvasSize, getCanvasRevision } from './canvas.js';
 
 let _setLoading = null;
 let _setStatus = null;
+let activeOperation = null;
 
 export function initAITools(setLoading, setStatus) {
     _setLoading = setLoading;
@@ -22,16 +23,63 @@ function hideLoading() {
 }
 
 function showError(msg) {
-    hideLoading();
     alert('AI Error: ' + msg);
+}
+
+function beginAI(message) {
+    if (activeOperation) return null;
+    const operation = {
+        controller: new AbortController(),
+        revision: getCanvasRevision()
+    };
+    activeOperation = operation;
+    showLoading(message);
+    return operation;
+}
+
+function assertCurrent(operation) {
+    if (operation.controller.signal.aborted || activeOperation !== operation) {
+        throw new DOMException('Cancelled', 'AbortError');
+    }
+    if (operation.revision !== getCanvasRevision()) {
+        throw new Error('The canvas has changed. Generate again to use the current drawing.');
+    }
+}
+
+async function applyAIResult(operation, base64) {
+    assertCurrent(operation);
+    await loadImageToCanvas(base64, {
+        expectedRevision: operation.revision,
+        signal: operation.controller.signal
+    });
+}
+
+function finishAI(operation) {
+    if (activeOperation !== operation) return;
+    activeOperation = null;
+    hideLoading();
+}
+
+function handleAIError(operation, error) {
+    if (activeOperation === operation && !operation.controller.signal.aborted) {
+        showError(error.message || 'Unable to complete the request.');
+    }
+}
+
+export function cancelAI() {
+    const operation = activeOperation;
+    if (!operation) return;
+    operation.controller.abort(new DOMException('Cancelled', 'AbortError'));
+    finishAI(operation);
 }
 
 /**
  * AUTO-COLOR: Analyze the line art on canvas, generate a colorized version
  */
 export async function autoColor() {
+    const operation = beginAI('Analyzing your drawing...');
+    if (!operation) return;
     try {
-        showLoading('Analyzing your drawing...');
         const base64 = getCanvasBase64();
         const { width, height } = getCanvasSize();
 
@@ -43,19 +91,22 @@ export async function autoColor() {
             'Then suggest appropriate, vivid colors for each part. ' +
             'Output a single detailed prompt for an image generation AI to recreate this drawing with full color. ' +
             'The prompt should preserve the original composition and shapes exactly, but add rich, natural coloring. ' +
-            'Output ONLY the prompt text, nothing else.'
+            'Output ONLY the prompt text, nothing else.',
+            2048, { signal: operation.controller.signal }
         );
 
         // Step 2: Generate colorized version with seedream
+        assertCurrent(operation);
         showLoading('Generating colored version...');
         const size = getSeedreamSize(width, height);
-        const b64Result = await generateImage(description, size);
+        const b64Result = await generateImage(description, size, { signal: operation.controller.signal });
 
         // Step 3: Load result onto canvas
-        await loadImageToCanvas(b64Result);
-        hideLoading();
-    } catch (e) {
-        showError(e.message);
+        await applyAIResult(operation, b64Result);
+    } catch (error) {
+        handleAIError(operation, error);
+    } finally {
+        finishAI(operation);
     }
 }
 
@@ -63,8 +114,9 @@ export async function autoColor() {
  * FINISH DRAWING: AI completes an unfinished drawing
  */
 export async function finishDrawing() {
+    const operation = beginAI('Understanding your drawing...');
+    if (!operation) return;
     try {
-        showLoading('Understanding your drawing...');
         const base64 = getCanvasBase64();
         const { width, height } = getCanvasSize();
 
@@ -76,19 +128,22 @@ export async function finishDrawing() {
             'Then create a detailed prompt for an image generation AI to produce the COMPLETED version of this drawing. ' +
             'The prompt should: preserve everything already drawn, complete the missing parts naturally, ' +
             'match the existing art style, and add appropriate colors and details. ' +
-            'Output ONLY the prompt text, nothing else.'
+            'Output ONLY the prompt text, nothing else.',
+            2048, { signal: operation.controller.signal }
         );
 
         // Step 2: Generate completed version
+        assertCurrent(operation);
         showLoading('Completing your drawing...');
         const size = getSeedreamSize(width, height);
-        const b64Result = await generateImage(description, size);
+        const b64Result = await generateImage(description, size, { signal: operation.controller.signal });
 
         // Step 3: Load result onto canvas
-        await loadImageToCanvas(b64Result);
-        hideLoading();
-    } catch (e) {
-        showError(e.message);
+        await applyAIResult(operation, b64Result);
+    } catch (error) {
+        handleAIError(operation, error);
+    } finally {
+        finishAI(operation);
     }
 }
 
@@ -101,8 +156,9 @@ export async function textToDrawing(textPrompt) {
         return;
     }
 
+    const operation = beginAI('Creating your drawing...');
+    if (!operation) return;
     try {
-        showLoading('Creating your drawing...');
         const { width, height } = getCanvasSize();
 
         // Step 1: Enhance the prompt with DeepSeek for better results
@@ -111,19 +167,22 @@ export async function textToDrawing(textPrompt) {
             'The user wants to generate this image: "' + textPrompt.trim() + '"\n\n' +
             'Enhance this into a detailed, vivid image generation prompt that will produce a high-quality result. ' +
             'Add details about style, lighting, composition, and colors while preserving the user\'s intent. ' +
-            'Output ONLY the enhanced prompt text, nothing else.'
+            'Output ONLY the enhanced prompt text, nothing else.',
+            2048, { signal: operation.controller.signal }
         );
 
         // Step 2: Generate image with seedream
+        assertCurrent(operation);
         showLoading('Generating image...');
         const size = getSeedreamSize(width, height);
-        const b64Result = await generateImage(enhancedPrompt, size);
+        const b64Result = await generateImage(enhancedPrompt, size, { signal: operation.controller.signal });
 
         // Step 3: Load result onto canvas
-        await loadImageToCanvas(b64Result);
-        hideLoading();
-    } catch (e) {
-        showError(e.message);
+        await applyAIResult(operation, b64Result);
+    } catch (error) {
+        handleAIError(operation, error);
+    } finally {
+        finishAI(operation);
     }
 }
 
@@ -150,8 +209,9 @@ export async function styleTransfer(styleName) {
         return;
     }
 
+    const operation = beginAI('Analyzing your artwork...');
+    if (!operation) return;
     try {
-        showLoading('Analyzing your artwork...');
         const base64 = getCanvasBase64();
         const { width, height } = getCanvasSize();
 
@@ -162,19 +222,22 @@ export async function styleTransfer(styleName) {
             'Then create a prompt for an image generation AI to recreate this EXACT same scene and composition, ' +
             'but rendered as ' + styleDesc + '. ' +
             'The prompt must preserve the original subject matter and layout precisely. ' +
-            'Output ONLY the prompt text, nothing else.'
+            'Output ONLY the prompt text, nothing else.',
+            2048, { signal: operation.controller.signal }
         );
 
         // Step 2: Generate styled version
+        assertCurrent(operation);
         showLoading('Applying ' + styleName.replace('-', ' ') + ' style...');
         const size = getSeedreamSize(width, height);
-        const b64Result = await generateImage(description, size);
+        const b64Result = await generateImage(description, size, { signal: operation.controller.signal });
 
         // Step 3: Load result onto canvas
-        await loadImageToCanvas(b64Result);
-        hideLoading();
-    } catch (e) {
-        showError(e.message);
+        await applyAIResult(operation, b64Result);
+    } catch (error) {
+        handleAIError(operation, error);
+    } finally {
+        finishAI(operation);
     }
 }
 

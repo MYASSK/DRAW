@@ -1,6 +1,6 @@
 // settings.js — Logo interaction and theme switching
 
-import { setBGMVolume } from './bgm.js';
+import { setBGMVolume, getBGMVolume } from './bgm.js';
 
 export function initSettings() {
     const logoIcon = document.getElementById('logoIcon');
@@ -31,6 +31,11 @@ export function initSettings() {
 
     // Theme buttons
     const themeBtns = document.querySelectorAll('.settings-theme-btn');
+    let savedTheme = 'classic';
+    try { savedTheme = localStorage.getItem('draw_theme') || savedTheme; } catch {}
+    if (!['classic', 'modern', 'summer'].includes(savedTheme)) savedTheme = 'classic';
+    setTheme(savedTheme);
+    themeBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.theme === savedTheme));
     themeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             themeBtns.forEach(b => b.classList.remove('active'));
@@ -47,6 +52,8 @@ export function initSettings() {
     // BGM volume slider
     const volumeSlider = document.getElementById('bgmVolumeSlider');
     const volumeValue = document.getElementById('bgmVolumeValue');
+    volumeSlider.value = Math.round(getBGMVolume() * 100);
+    volumeValue.textContent = volumeSlider.value + '%';
     volumeSlider.addEventListener('input', () => {
         const vol = parseInt(volumeSlider.value);
         volumeValue.textContent = vol + '%';
@@ -62,6 +69,7 @@ export function initSettings() {
 function setTheme(theme) {
     document.body.classList.remove('theme-classic', 'theme-modern', 'theme-summer');
     document.body.classList.add(`theme-${theme}`);
+    try { localStorage.setItem('draw_theme', theme); } catch {}
 }
 
 function openHelpDialog() {
@@ -104,7 +112,10 @@ function openHelpDialog() {
 <p>CLEAR — 一键清空画布</p>
 
 <h3>文件操作</h3>
-<p>SAVE — 导出画布为PNG图片（自动命名）</p>
+<p>顶部“保存”将画布保存为 .draw 工程，之后可重新打开继续编辑。第一版工程保存单张画布及尺寸，不包含撤销历史和 API Key。</p>
+<p>Ctrl / ⌘ S 保存，Ctrl / ⌘ Shift S 另存为，Ctrl / ⌘ O 打开，Ctrl / ⌘ N 新建。</p>
+<p>PNG — 导出图片用于分享。绘画停止后自动备份本地草稿，下次启动可恢复。</p>
+<p>Ctrl / ⌘ Z 撤销，Ctrl / ⌘ Shift Z 重做。窗口大小变化不会改变作品尺寸。</p>
 <p>IMPORT — 导入图片，支持拖拽移动和缩放（按Shift解锁宽高比）</p>
 
 <h3>图像处理</h3>

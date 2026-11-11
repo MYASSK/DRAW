@@ -1,6 +1,75 @@
-# DRAW!
+# DRAW! Desktop — v0.1.0
 
-A retro-styled web drawing application inspired by the early internet era, featuring Windows 95 UI aesthetics, pixel fonts, and vibrant colors. Built with pure HTML, CSS, and JavaScript — no frameworks, no build tools.
+`deskVersion1.0` is the first desktop version, built with Tauri 2. The existing retro drawing interface runs in a standalone window. Drawing and filters work offline; AI tools still require a network connection and your own Volcano Ark API key.
+
+## Desktop workflow
+
+- **新建 / 打开工程 / 保存 / 另存为**: work with portable `.draw` projects. Version 1 stores one flattened canvas, its original pixel dimensions, name and format version. It does **not** include layers, undo history, API keys or music.
+- **导出 PNG / PNG**: export an image for sharing, separately from saving a project.
+- **Recovery**: after an edit, an idle delay of 800 ms schedules a local draft. The status bar reports success or failure. On the next launch, choose whether to restore it. This is a local recovery copy, not a replacement for saving a `.draw` file.
+- **Close protection**: closing the window, choosing the app's Quit menu or pressing Cmd/Ctrl+Q prompts you to save, discard or cancel. A failed save never closes the document automatically. macOS Dock Quit and operating-system termination rely on the latest completed recovery backup; they do not use this confirmation flow.
+- **Canvas**: starts at 1280 × 720. Resizing the window only changes the display scale, preserving the original pixels. Loaded projects can use other dimensions, with a maximum of 8192 per side and 16,777,216 total pixels.
+- **History**: up to 30 steps within a shared 96 MiB budget. Larger canvases can retain fewer steps. AI results and completed filters participate in undo and recovery.
+- **Input**: mouse, touch and pen share Pointer Events. Pressure-sensitive brush width is not implemented in this version.
+- **Music**: starts muted by default. Click the top-right logo to adjust the volume. Theme and volume preferences are remembered.
+
+| Action | Windows | macOS |
+| --- | --- | --- |
+| Save project | Ctrl+S | ⌘S |
+| Save as | Ctrl+Shift+S | ⌘Shift+S |
+| Open project | Ctrl+O | ⌘O |
+| New project | Ctrl+N | ⌘N |
+| Undo | Ctrl+Z | ⌘Z |
+| Redo | Ctrl+Shift+Z / Ctrl+Y | ⌘Shift+Z |
+
+## Run and build the desktop app
+
+Install Node.js 20+ and the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/) (Rust and platform development tools). On Windows, Tauri uses Microsoft C++ Build Tools and WebView2. On macOS, install Xcode Command Line Tools.
+
+```bash
+npm ci
+npm run desktop:dev
+```
+
+The launcher also detects a project-local Rust toolchain in `.tools/cargo` and `.tools/rustup`, if present. It does not change your shell's PATH. These directories are ignored by Git.
+
+Build on the target platform:
+
+```bash
+# Windows: NSIS installer
+npm run desktop:build -- --bundles nsis
+
+# macOS: standalone app
+npm run desktop:build -- --bundles app
+```
+
+Outputs are under `src-tauri/target/release/bundle/`: `nsis/*-setup.exe` on Windows and `macos/DRAW.app` on macOS. The unsigned development build does not include automatic updates.
+
+The [desktop workflow](.github/workflows/desktop.yml) builds Windows and macOS artifacts when this branch is pushed, or when manually dispatched in GitHub Actions. It uploads build artifacts only; it does not publish a release. Local builds do not upload source or artifacts.
+
+## Validation
+
+```bash
+npm test
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+```
+
+The JavaScript tests cover project validation, viewport-independent pixels, coordinate mapping, history, image import, stale AI results and restricted math expressions. Rust tests cover file limits, path authorization, atomic replacement and recovery storage.
+
+## Storage and first-version limits
+
+Desktop project writes use a native picker; subsequent saves may reuse only a path chosen during that app session. Recovery is stored in the OS app-data directory for `io.github.myassk.draw` as `recovery.draw`. Writes use a temporary file followed by atomic replacement.
+
+Browser preview remains available with `npm run dev`, using downloads for project export and IndexedDB for the recovery draft. Desktop and browser preview have separate storage; existing browser API keys are not automatically migrated.
+
+This release does not add layers, zoom/pan controls, recent-file lists, file associations, pressure-sensitive brushes or a background filter worker. AI colorization/completion/style transfer still describe the source image and generate a new image from that description; they do not guarantee preservation of the original lines. Requests now support cancellation and timeout. Pixel math accepts a limited mathematical grammar, not arbitrary JavaScript.
+
+---
+
+## Original project
+
+A retro-styled drawing application inspired by the early internet era, featuring Windows 95 UI aesthetics, pixel fonts, and vibrant colors. Its frontend uses HTML, CSS and JavaScript ES Modules.
 
 ## Features
 
@@ -15,7 +84,7 @@ A retro-styled web drawing application inspired by the early internet era, featu
 - Real-time color preview
 
 ### History
-- **Undo / Redo** — Up to 30 steps of undo history
+- **Undo / Redo** — Up to 30 steps within a 96 MiB memory budget
 - **Clear** — Reset the canvas to blank white
 
 ### File Operations
@@ -100,7 +169,8 @@ DRAW/
 - **Canvas:** HTML5 Canvas 2D API
 - **Fonts:** BoldsPixels, Mister Pixel, HYPixel11pxU-2
 - **AI Backend:** Volcano Ark API — DeepSeek (chat/vision), Seedream (image generation)
-- **Build tools:** None — runs directly on any static HTTP server
+- **Desktop:** Tauri 2 + Rust; static asset packaging with Node.js
+- **Browser preview:** Runs on a local static HTTP server
 
 ## License
 

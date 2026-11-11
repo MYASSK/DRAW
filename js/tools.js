@@ -1,6 +1,13 @@
 // tools.js — Brush, Eraser, and Flood Fill logic
 
 export function drawLine(ctx, x0, y0, x1, y1, color, size) {
+    if (x0 === x1 && y0 === y1) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(x0, y0, size / 2, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+    }
     ctx.strokeStyle = color;
     ctx.lineWidth = size;
     ctx.lineCap = 'round';
@@ -16,6 +23,7 @@ export function erase(ctx, x0, y0, x1, y1, size) {
 }
 
 export function floodFill(ctx, startX, startY, fillColor, canvasWidth, canvasHeight) {
+    if (startX < 0 || startY < 0 || startX >= canvasWidth || startY >= canvasHeight) return;
     const imageData = ctx.getImageData(0, 0, canvasWidth, canvasHeight);
     const data = imageData.data;
 
@@ -105,8 +113,8 @@ export function blurStroke(ctx, cx, cy, size, canvasWidth, canvasHeight) {
     for (let py = kernelSize; py < h - kernelSize; py++) {
         for (let px = kernelSize; px < w - kernelSize; px++) {
             // Only blur within circular radius
-            const dx = px - radius;
-            const dy = py - radius;
+            const dx = px - (cx - x);
+            const dy = py - (cy - y);
             if (dx * dx + dy * dy > radius * radius) continue;
 
             let r = 0, g = 0, b = 0, count = 0;

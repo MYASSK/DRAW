@@ -1,10 +1,12 @@
 // filter-dialog.js — Win95-style filter dialog with animated convolution
 
-import { FILTER_PRESETS, CATEGORIES, applyKernelRows, applyFilter, applyCustomKernel } from './filters.js';
-import { getCanvasCtx, saveState } from './canvas.js';
+import { FILTER_PRESETS, CATEGORIES, applyFilter, applyCustomKernel } from './filters.js';
+import { getCanvasCtx, saveState, notifyCanvasChanged, getCanvasRevision } from './canvas.js';
 
 let dialogEl = null;
 let animFrameId = null;
+let previewCanvas = null;
+let applying = false;
 
 export function openFilterDialog() {
     if (dialogEl) return;
@@ -13,10 +15,7 @@ export function openFilterDialog() {
 }
 
 export function closeFilterDialog() {
-    if (animFrameId) {
-        cancelAnimationFrame(animFrameId);
-        animFrameId = null;
-    }
+    stopPreview();
     if (dialogEl) {
         dialogEl.remove();
         dialogEl = null;
@@ -92,12 +91,14 @@ function buildDialog() {
         input.className = 'kernel-cell';
         input.id = `kc${i}`;
         input.value = (i === 4) ? '1' : '0'; // identity kernel default
+        input.addEventListener('input', () => { delete dialogEl.dataset.currentPreset; });
         grid.appendChild(input);
     }
     kernelPanel.appendChild(grid);
 
     const applyBtn = document.createElement('button');
     applyBtn.className = 'filter-apply-btn';
+    applyBtn.id = 'filterApplyBtn';
     applyBtn.textContent = 'APPLY';
     applyBtn.addEventListener('click', () => applyWithAnimation());
     kernelPanel.appendChild(applyBtn);
@@ -143,77 +144,99 @@ function getKernelFromGrid() {
     const kernel = [];
     for (let i = 0; i < 9; i++) {
         const val = parseFloat(document.getElementById(`kc${i}`).value);
-        if (isNaN(val)) return null;
+        if (!Number.isFinite(val)) return null;
         kernel.push(val);
     }
     return kernel;
 }
 
+function setApplying(value) {
+    applying = value;
+    dialogEl?.querySelectorAll('input, .filter-preset-btn, .filter-apply-btn').forEach(control => {
+        control.disabled = value;
+    });
+}
+
+function stopPreview() {
+    if (animFrameId !== null) cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+    previewCanvas?.remove();
+    previewCanvas = null;
+    setApplying(false);
+}
+
 function applyWithAnimation() {
+    if (applying || !dialogEl) return;
     const { ctx, canvas } = getCanvasCtx();
-    const presetId = dialogEl?.dataset.currentPreset;
+    const presetId = dialogEl.dataset.currentPreset;
     const preset = presetId ? FILTER_PRESETS[presetId] : null;
     const status = document.getElementById('filterStatus');
-
-    // Determine if we use custom kernel or special filter
     const isSpecial = preset && !preset.kernel;
     const customKernel = isSpecial ? null : getKernelFromGrid();
-
     if (!isSpecial && !customKernel) {
         status.textContent = 'ERROR: Invalid kernel values!';
         return;
     }
-
-    saveState();
-
-    const width = canvas.width;
-    const height = canvas.height;
-    const srcImageData = ctx.getImageData(0, 0, width, height);
-
-    if (isSpecial) {
-        // Special filters: animate with pre-computed result
-        const result = applyFilter(srcImageData, presetId);
-        animateScanline(ctx, srcImageData, result, width, height, status);
-        return;
+    setApplying(true);
+    const revision = getCanvasRevision();
+    try {
+        const source = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const result = isSpecial ? applyFilter(source, presetId) : applyCustomKernel(source, customKernel);
+        animateScanline(canvas, ctx, source, result, revision, status);
+    } catch (error) {
+        stopPreview();
+        status.textContent = 'ERROR: ' + error.message;
     }
-
-    // Kernel convolution: compute full result first, then animate
-    const result = applyCustomKernel(srcImageData, customKernel);
-    animateScanline(ctx, srcImageData, result, width, height, status);
 }
 
-function animateScanline(ctx, srcImageData, resultImageData, width, height, statusEl) {
-    const rowsPerFrame = Math.max(3, Math.ceil(height / 60)); // ~60 frames total, 1-2 seconds
+function animateScanline(canvas, ctx, source, result, revision, status) {
+    const width = source.width;
+    const height = source.height;
+    const rowsPerFrame = Math.max(3, Math.ceil(height / 60));
     let currentRow = 0;
-
-    statusEl.textContent = 'Processing...';
+    // Preview never writes into the document canvas or undo history.
+    previewCanvas = document.createElement('canvas');
+    previewCanvas.width = width;
+    previewCanvas.height = height;
+    previewCanvas.setAttribute('aria-hidden', 'true');
+    Object.assign(previewCanvas.style, {
+        position: 'absolute', pointerEvents: 'none', zIndex: '101',
+    });
+    const previewCtx = previewCanvas.getContext('2d');
+    previewCtx.putImageData(source, 0, 0);
+    canvas.parentElement.appendChild(previewCanvas);
+    status.textContent = 'Processing... Close to cancel.';
 
     function frame() {
-        const endRow = Math.min(currentRow + rowsPerFrame, height);
-
-        // Draw processed rows from result
-        const strip = new ImageData(
-            resultImageData.data.slice(currentRow * width * 4, endRow * width * 4),
-            width,
-            endRow - currentRow
-        );
-        ctx.putImageData(strip, 0, currentRow);
-
-        // Draw scanline indicator
-        ctx.fillStyle = '#00ff00';
-        ctx.fillRect(0, endRow - 1, width, 2);
-
-        currentRow = endRow;
-
-        if (currentRow < height) {
-            animFrameId = requestAnimationFrame(frame);
-        } else {
-            // Clean up: put final row without green line
-            ctx.putImageData(resultImageData, 0, 0);
-            statusEl.textContent = 'Done!';
-            animFrameId = null;
+        if (!dialogEl || !previewCanvas) return;
+        if (getCanvasRevision() !== revision) {
+            stopPreview();
+            status.textContent = 'Canvas changed. Apply the filter again.';
+            return;
+        }
+        try {
+            Object.assign(previewCanvas.style, {
+                left: (canvas.offsetLeft + canvas.clientLeft) + 'px',
+                top: (canvas.offsetTop + canvas.clientTop) + 'px',
+                width: canvas.clientWidth + 'px', height: canvas.clientHeight + 'px',
+            });
+            currentRow = Math.min(currentRow + rowsPerFrame, height);
+            previewCtx.putImageData(result, 0, 0, 0, 0, width, currentRow);
+            if (currentRow < height) {
+                previewCtx.fillStyle = '#00ff00';
+                previewCtx.fillRect(0, currentRow, width, Math.min(2, height - currentRow));
+                animFrameId = requestAnimationFrame(frame);
+            } else {
+                saveState();
+                ctx.putImageData(result, 0, 0);
+                notifyCanvasChanged('filter');
+                stopPreview();
+                status.textContent = 'Done!';
+            }
+        } catch (error) {
+            stopPreview();
+            status.textContent = 'ERROR: ' + error.message;
         }
     }
-
     animFrameId = requestAnimationFrame(frame);
 }

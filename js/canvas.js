@@ -1,117 +1,100 @@
-// canvas.js — Canvas management and event handling
-
+// Pixel documents are independent of their displayed size.
 import { drawLine, erase, floodFill, blurStroke } from './tools.js';
+import { validateDocumentSize, fitDocumentDisplay, contentRect,
+    clientToDocumentPoint, fitImageInside, resizeImageFromCorner } from './canvas-geometry.js';
 
 let canvas, ctx;
-let isDrawing = false;
+let activePointerId = null;
 let lastX = 0;
 let lastY = 0;
-
-// Undo/Redo history
+let revision = 0;
+let resizeObserver;
 const undoStack = [];
 const redoStack = [];
 const MAX_UNDO = 30;
+const MAX_HISTORY_BYTES = 96 * 1024 * 1024;
 
-// State shared with toolbar
 export const state = {
-    currentTool: 'brush',
-    currentColor: 'rgb(0, 0, 0)',
-    brushSize: 5
+    currentTool: 'brush', currentColor: 'rgb(0, 0, 0)', brushSize: 5
 };
 
 export function initCanvas() {
+    if (canvas) return;
     canvas = document.getElementById('drawCanvas');
-    ctx = canvas.getContext('2d');
-
-    resizeCanvas();
+    ctx = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.style.touchAction = 'none';
+    canvas.style.boxSizing = 'content-box';
+    newCanvasDocument();
     window.addEventListener('resize', resizeCanvas);
+    if (typeof ResizeObserver !== 'undefined') {
+        resizeObserver = new ResizeObserver(resizeCanvas);
+        resizeObserver.observe(canvas.parentElement);
+    }
+    canvas.addEventListener('pointerdown', onPointerDown);
+    canvas.addEventListener('pointermove', onPointerMove);
+    canvas.addEventListener('pointerup', finishStroke);
+    canvas.addEventListener('pointercancel', finishStroke);
+    canvas.addEventListener('lostpointercapture', finishStroke);
+}
 
-    canvas.addEventListener('mousedown', onMouseDown);
-    canvas.addEventListener('mousemove', onMouseMove);
-    canvas.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('mouseleave', onMouseUp);
+function numericStyle(style, name) {
+    return parseFloat(style[name]) || 0;
+}
 
-    // Prevent page zoom (Ctrl+scroll, Ctrl+plus/minus)
-    window.addEventListener('wheel', (e) => {
-        if (e.ctrlKey) e.preventDefault();
-    }, { passive: false });
-
-    window.addEventListener('keydown', (e) => {
-        if (e.ctrlKey && (e.key === '=' || e.key === '+' || e.key === '-' || e.key === '0')) {
-            e.preventDefault();
-        }
+function canvasContentRect() {
+    const style = getComputedStyle(canvas);
+    return contentRect(canvas.getBoundingClientRect(), {
+        left: numericStyle(style, 'borderLeftWidth') + numericStyle(style, 'paddingLeft'),
+        right: numericStyle(style, 'borderRightWidth') + numericStyle(style, 'paddingRight'),
+        top: numericStyle(style, 'borderTopWidth') + numericStyle(style, 'paddingTop'),
+        bottom: numericStyle(style, 'borderBottomWidth') + numericStyle(style, 'paddingBottom')
     });
 }
 
-let hasDrawn = false;
-
 function resizeCanvas() {
-    const container = document.getElementById('canvas-container');
-    const w = container.clientWidth - 16;
-    const h = container.clientHeight - 16;
-
-    // Save current drawing at full old size before resizing
-    const oldW = canvas.width;
-    const oldH = canvas.height;
-    const tempImage = (ctx && hasDrawn) ? ctx.getImageData(0, 0, oldW, oldH) : null;
-
-    canvas.width = w;
-    canvas.height = h;
-
-    // Fill white background
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Restore drawing if existed — use drawImage to preserve content at any size
-    if (tempImage) {
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = oldW;
-        tempCanvas.height = oldH;
-        tempCanvas.getContext('2d').putImageData(tempImage, 0, 0);
-        ctx.drawImage(tempCanvas, 0, 0);
-    }
-
-    hasDrawn = true;
+    const container = canvas.parentElement;
+    const style = getComputedStyle(container);
+    const canvasStyle = getComputedStyle(canvas);
+    const availableWidth = container.clientWidth - numericStyle(style, 'paddingLeft') -
+        numericStyle(style, 'paddingRight') - numericStyle(canvasStyle, 'borderLeftWidth') -
+        numericStyle(canvasStyle, 'borderRightWidth') - 4;
+    const availableHeight = container.clientHeight - numericStyle(style, 'paddingTop') -
+        numericStyle(style, 'paddingBottom') - numericStyle(canvasStyle, 'borderTopWidth') -
+        numericStyle(canvasStyle, 'borderBottomWidth') - 4;
+    const display = fitDocumentDisplay(canvas.width, canvas.height, availableWidth, availableHeight);
+    canvas.style.width = `${display.width}px`;
+    canvas.style.height = `${display.height}px`;
+    syncImportOverlay();
 }
 
-function getCanvasPos(e) {
-    const rect = canvas.getBoundingClientRect();
-    return {
-        x: Math.floor(e.clientX - rect.left),
-        y: Math.floor(e.clientY - rect.top)
-    };
+function getCanvasPos(event) {
+    return clientToDocumentPoint(event.clientX, event.clientY,
+        canvasContentRect(), canvas.width, canvas.height);
 }
 
-function onMouseDown(e) {
-    const pos = getCanvasPos(e);
+function insideDocument({ x, y }) {
+    return x >= 0 && y >= 0 && x < canvas.width && y < canvas.height;
+}
 
-    // Save state before any drawing action
+function onPointerDown(event) {
+    if (event.button !== 0 || event.isPrimary === false || activePointerId !== null || isImporting()) return;
+    const pos = getCanvasPos(event);
+    if (!insideDocument(pos)) return;
+    event.preventDefault();
     saveState();
-
     if (state.currentTool === 'fill') {
-        floodFill(ctx, pos.x, pos.y, state.currentColor, canvas.width, canvas.height);
+        floodFill(ctx, Math.floor(pos.x), Math.floor(pos.y), state.currentColor, canvas.width, canvas.height);
+        notifyCanvasChanged('fill');
         return;
     }
-
-    isDrawing = true;
+    activePointerId = event.pointerId;
+    canvas.setPointerCapture(event.pointerId);
     lastX = pos.x;
     lastY = pos.y;
-
-    // Draw a dot on click
-    if (state.currentTool === 'brush') {
-        drawLine(ctx, lastX, lastY, lastX, lastY, state.currentColor, state.brushSize);
-    } else if (state.currentTool === 'eraser') {
-        erase(ctx, lastX, lastY, lastX, lastY, state.brushSize);
-    } else if (state.currentTool === 'blur') {
-        blurStroke(ctx, lastX, lastY, state.brushSize, canvas.width, canvas.height);
-    }
+    drawAt(pos);
 }
 
-function onMouseMove(e) {
-    if (!isDrawing) return;
-
-    const pos = getCanvasPos(e);
-
+function drawAt(pos) {
     if (state.currentTool === 'brush') {
         drawLine(ctx, lastX, lastY, pos.x, pos.y, state.currentColor, state.brushSize);
     } else if (state.currentTool === 'eraser') {
@@ -119,44 +102,88 @@ function onMouseMove(e) {
     } else if (state.currentTool === 'blur') {
         blurStroke(ctx, pos.x, pos.y, state.brushSize, canvas.width, canvas.height);
     }
-
     lastX = pos.x;
     lastY = pos.y;
+    // Invalidate async work immediately, before the stroke-end notification.
+    revision++;
 }
 
-function onMouseUp() {
-    isDrawing = false;
+function onPointerMove(event) {
+    if (event.pointerId !== activePointerId) return;
+    event.preventDefault();
+    const coalesced = event.getCoalescedEvents?.();
+    for (const sample of coalesced?.length ? coalesced : [event]) drawAt(getCanvasPos(sample));
 }
 
-export function clearCanvas() {
-    saveState();
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+function finishStroke(event) {
+    if (activePointerId === null || (event && event.pointerId !== activePointerId)) return;
+    const pointerId = activePointerId;
+    activePointerId = null;
+    if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+    notifyCanvasChanged('stroke');
+}
+
+export function finishCanvasStroke() {
+    finishStroke();
+}
+
+export function notifyCanvasChanged(reason = 'edit') {
+    revision++;
+    document.dispatchEvent(new CustomEvent('draw:change', { detail: { reason } }));
+}
+
+export function getCanvasRevision() {
+    return revision;
+}
+
+function historyBytes() {
+    return [...undoStack, ...redoStack].reduce((sum, image) => sum + image.data.byteLength, 0);
+}
+
+function trimHistory(preferredStack) {
+    while (undoStack.length > MAX_UNDO) undoStack.shift();
+    while (redoStack.length > MAX_UNDO) redoStack.shift();
+    // Both stacks share one budget; discard the farthest reachable states first.
+    while (historyBytes() > MAX_HISTORY_BYTES) {
+        const otherStack = preferredStack === undoStack ? redoStack : undoStack;
+        if (otherStack.length) otherStack.shift();
+        else if (preferredStack.length) preferredStack.shift();
+        else break;
+    }
 }
 
 export function saveState() {
     undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    if (undoStack.length > MAX_UNDO) {
-        undoStack.shift();
-    }
-    // New drawing action clears redo history
     redoStack.length = 0;
+    trimHistory(undoStack);
 }
 
 export function undo() {
-    if (undoStack.length === 0) return;
-    // Save current state to redo stack before undoing
+    if (!undoStack.length) return;
+    finishStroke();
+    const previous = undoStack.pop();
     redoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    const imageData = undoStack.pop();
-    ctx.putImageData(imageData, 0, 0);
+    ctx.putImageData(previous, 0, 0);
+    trimHistory(redoStack);
+    notifyCanvasChanged('undo');
 }
 
 export function redo() {
-    if (redoStack.length === 0) return;
-    // Save current state to undo stack before redoing
+    if (!redoStack.length) return;
+    finishStroke();
+    const next = redoStack.pop();
     undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-    const imageData = redoStack.pop();
-    ctx.putImageData(imageData, 0, 0);
+    ctx.putImageData(next, 0, 0);
+    trimHistory(undoStack);
+    notifyCanvasChanged('redo');
+}
+
+export function clearCanvas() {
+    finishStroke();
+    saveState();
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    notifyCanvasChanged('clear');
 }
 
 export function getCanvasDataURL() {
@@ -164,19 +191,96 @@ export function getCanvasDataURL() {
 }
 
 export function getCanvasBase64() {
-    return canvas.toDataURL('image/png').split(',')[1];
+    return getCanvasDataURL().split(',')[1];
 }
 
-export function loadImageToCanvas(base64Data) {
+function abortError() {
+    return new DOMException('操作已取消。', 'AbortError');
+}
+
+function decodeImage(source, signal) {
     return new Promise((resolve, reject) => {
+        if (signal?.aborted) { reject(abortError()); return; }
         const img = new Image();
-        img.onload = () => {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            resolve();
+        const cleanup = () => {
+            img.onload = null;
+            img.onerror = null;
+            signal?.removeEventListener('abort', onAbort);
         };
-        img.onerror = reject;
-        img.src = `data:image/png;base64,${base64Data}`;
+        const onAbort = () => { cleanup(); img.src = ''; reject(abortError()); };
+        img.onload = () => {
+            cleanup();
+            try {
+                validateDocumentSize(img.naturalWidth || img.width, img.naturalHeight || img.height);
+                resolve(img);
+            } catch (error) { reject(error); }
+        };
+        img.onerror = () => { cleanup(); reject(new Error('图片无法读取，请选择有效的 PNG、JPEG 或 WebP 图片。')); };
+        signal?.addEventListener('abort', onAbort, { once: true });
+        img.src = source;
     });
+}
+
+function checkPendingEdit(expectedRevision, signal) {
+    if (signal?.aborted) throw abortError();
+    if (expectedRevision !== revision) throw new Error('画布已发生变化，请重新生成。');
+}
+
+export async function loadImageToCanvas(base64Data, options = {}) {
+    const expectedRevision = options.expectedRevision ?? revision;
+    const source = base64Data.startsWith('data:image/') ? base64Data : `data:image/png;base64,${base64Data}`;
+    const img = await decodeImage(source, options.signal);
+    checkPendingEdit(expectedRevision, options.signal);
+    const staged = document.createElement('canvas');
+    staged.width = canvas.width;
+    staged.height = canvas.height;
+    const stageCtx = staged.getContext('2d');
+    stageCtx.fillStyle = '#ffffff';
+    stageCtx.fillRect(0, 0, staged.width, staged.height);
+    const rect = fitImageInside(img.naturalWidth || img.width, img.naturalHeight || img.height,
+        staged.width, staged.height);
+    stageCtx.drawImage(img, rect.x, rect.y, rect.w, rect.h);
+    checkPendingEdit(expectedRevision, options.signal);
+    saveState();
+    ctx.drawImage(staged, 0, 0);
+    notifyCanvasChanged('ai');
+}
+
+function resetDocument(width, height, image = null) {
+    cancelImport();
+    if (activePointerId !== null) {
+        const pointerId = activePointerId;
+        activePointerId = null;
+        if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+    }
+    canvas.width = width;
+    canvas.height = height;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    if (image) ctx.drawImage(image, 0, 0);
+    undoStack.length = 0;
+    redoStack.length = 0;
+    revision++;
+    resizeCanvas();
+}
+
+export function newCanvasDocument(width = 1280, height = 720) {
+    validateDocumentSize(width, height);
+    resetDocument(width, height);
+}
+
+export async function replaceCanvasDocument({ width, height, imageDataURL }) {
+    validateDocumentSize(width, height);
+    if (typeof imageDataURL !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/i.test(imageDataURL)) {
+        throw new Error('项目图片必须是 PNG、JPEG 或 WebP 的 data URL。');
+    }
+    const expectedRevision = revision;
+    const img = await decodeImage(imageDataURL);
+    if ((img.naturalWidth || img.width) !== width || (img.naturalHeight || img.height) !== height) {
+        throw new Error('项目声明的画布尺寸与图片尺寸不一致。');
+    }
+    if (expectedRevision !== revision) throw new Error('读取项目时画布已变化，请重新打开项目。');
+    resetDocument(width, height, img);
 }
 
 export function getCanvasSize() {
@@ -189,48 +293,59 @@ export function getCanvasCtx() {
 
 export function saveCanvasAsFile() {
     const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
+    const pad = n => String(n).padStart(2, '0');
     const filename = `DRAW_${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
     const link = document.createElement('a');
     link.download = filename;
-    link.href = canvas.toDataURL('image/png');
+    link.href = getCanvasDataURL();
     link.click();
 }
 
-// Import image overlay system
-let importState = null; // { img, x, y, w, h, dragging, resizing, ... }
+// Imported images stay in document coordinates; only the overlay follows the viewport.
+let importState = null;
+let pendingImport = null;
+let importGeneration = 0;
 let importOverlayCanvas = null;
 let importOverlayCtx = null;
+const HANDLE_SIZE = 10;
 
-export function startImageImport(file, onConfirm, onCancel) {
-    const img = new Image();
-    img.onload = () => {
-        // Scale image to fit within canvas, max 80% of canvas size
-        let w = img.width;
-        let h = img.height;
-        const maxW = canvas.width * 0.8;
-        const maxH = canvas.height * 0.8;
-        if (w > maxW || h > maxH) {
-            const scale = Math.min(maxW / w, maxH / h);
-            w = Math.floor(w * scale);
-            h = Math.floor(h * scale);
-        }
-        const x = Math.floor((canvas.width - w) / 2);
-        const y = Math.floor((canvas.height - h) / 2);
-
+export async function startImageImport(file, onConfirm, onCancel) {
+    cancelImport();
+    const generation = ++importGeneration;
+    const controller = new AbortController();
+    pendingImport = { controller, onCancel };
+    let url;
+    try {
+        url = URL.createObjectURL(file);
+        const img = await decodeImage(url, controller.signal);
+        if (generation !== importGeneration) return false;
+        pendingImport = null;
+        const placement = fitImageInside(img.naturalWidth || img.width, img.naturalHeight || img.height,
+            canvas.width * 0.8, canvas.height * 0.8, 1);
         importState = {
-            img, x, y, w, h,
-            originalAspect: img.width / img.height,
-            dragging: false, resizing: false,
-            dragOffX: 0, dragOffY: 0,
-            resizeCorner: null,
-            onConfirm, onCancel
+            img, ...placement,
+            x: placement.x + canvas.width * 0.1,
+            y: placement.y + canvas.height * 0.1,
+            originalAspect: (img.naturalWidth || img.width) / (img.naturalHeight || img.height),
+            dragging: false, resizing: false, pointerId: null,
+            dragOffX: 0, dragOffY: 0, resizeCorner: null, onConfirm, onCancel
         };
-
         createImportOverlay();
         drawImportOverlay();
-    };
-    img.src = URL.createObjectURL(file);
+        return true;
+    } catch (error) {
+        if (generation === importGeneration) {
+            pendingImport = null;
+            removeImportOverlay();
+            onCancel?.(error);
+            if (!onCancel && error.name !== 'AbortError') {
+                document.dispatchEvent(new CustomEvent('draw:error', { detail: { message: error.message } }));
+            }
+        }
+        return false;
+    } finally {
+        if (url) URL.revokeObjectURL(url);
+    }
 }
 
 function createImportOverlay() {
@@ -238,184 +353,133 @@ function createImportOverlay() {
     importOverlayCanvas.id = 'importOverlay';
     importOverlayCanvas.width = canvas.width;
     importOverlayCanvas.height = canvas.height;
-
-    // Position overlay exactly on top of the canvas using its bounding rect
-    const canvasRect = canvas.getBoundingClientRect();
-    const containerRect = canvas.parentElement.getBoundingClientRect();
-    importOverlayCanvas.style.position = 'absolute';
-    importOverlayCanvas.style.top = (canvasRect.top - containerRect.top) + 'px';
-    importOverlayCanvas.style.left = (canvasRect.left - containerRect.left) + 'px';
-    importOverlayCanvas.style.cursor = 'move';
-    importOverlayCanvas.style.zIndex = '100';
+    Object.assign(importOverlayCanvas.style, {
+        position: 'absolute', cursor: 'move', zIndex: '100', touchAction: 'none',
+        border: '0', padding: '0', margin: '0', boxSizing: 'content-box'
+    });
     canvas.parentElement.style.position = 'relative';
     canvas.parentElement.appendChild(importOverlayCanvas);
     importOverlayCtx = importOverlayCanvas.getContext('2d');
-
-    importOverlayCanvas.addEventListener('mousedown', onImportMouseDown);
-    importOverlayCanvas.addEventListener('mousemove', onImportMouseMove);
-    importOverlayCanvas.addEventListener('mouseup', onImportMouseUp);
-    importOverlayCanvas.addEventListener('mouseleave', onImportMouseUp);
+    importOverlayCanvas.addEventListener('pointerdown', onImportPointerDown);
+    importOverlayCanvas.addEventListener('pointermove', onImportPointerMove);
+    importOverlayCanvas.addEventListener('pointerup', onImportPointerUp);
+    importOverlayCanvas.addEventListener('pointercancel', onImportPointerUp);
+    importOverlayCanvas.addEventListener('lostpointercapture', onImportPointerUp);
     window.addEventListener('keydown', onImportKeyDown);
+    syncImportOverlay();
+}
+
+function syncImportOverlay() {
+    if (!importOverlayCanvas) return;
+    const rect = canvasContentRect();
+    const parent = canvas.parentElement;
+    const parentRect = parent.getBoundingClientRect();
+    importOverlayCanvas.style.left = `${rect.left - parentRect.left - parent.clientLeft + parent.scrollLeft}px`;
+    importOverlayCanvas.style.top = `${rect.top - parentRect.top - parent.clientTop + parent.scrollTop}px`;
+    importOverlayCanvas.style.width = `${rect.width}px`;
+    importOverlayCanvas.style.height = `${rect.height}px`;
+    drawImportOverlay();
 }
 
 function removeImportOverlay() {
-    if (importOverlayCanvas) {
-        importOverlayCanvas.remove();
-        importOverlayCanvas = null;
-        importOverlayCtx = null;
-    }
+    importOverlayCanvas?.remove();
+    importOverlayCanvas = null;
+    importOverlayCtx = null;
     window.removeEventListener('keydown', onImportKeyDown);
     importState = null;
 }
 
-const HANDLE_SIZE = 10;
+function handleSizeInDocument() {
+    return HANDLE_SIZE * canvas.width / canvasContentRect().width;
+}
 
-function getHandle(mx, my) {
+function getHandle(x, y) {
     if (!importState) return null;
-    const { x, y, w, h } = importState;
-    const corners = [
-        { name: 'tl', cx: x, cy: y },
-        { name: 'tr', cx: x + w, cy: y },
-        { name: 'bl', cx: x, cy: y + h },
-        { name: 'br', cx: x + w, cy: y + h }
-    ];
-    for (const c of corners) {
-        if (Math.abs(mx - c.cx) <= HANDLE_SIZE && Math.abs(my - c.cy) <= HANDLE_SIZE) {
-            return c.name;
-        }
+    const s = importState;
+    const radius = handleSizeInDocument();
+    for (const [name, cx, cy] of [
+        ['tl', s.x, s.y], ['tr', s.x + s.w, s.y],
+        ['bl', s.x, s.y + s.h], ['br', s.x + s.w, s.y + s.h]
+    ]) {
+        if (Math.abs(x - cx) <= radius && Math.abs(y - cy) <= radius) return name;
     }
     return null;
 }
 
-function onImportMouseDown(e) {
-    if (!importState) return;
-    const rect = importOverlayCanvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    const handle = getHandle(mx, my);
-    if (handle) {
-        importState.resizing = true;
-        importState.resizeCorner = handle;
-        return;
-    }
-
-    const { x, y, w, h } = importState;
-    if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-        importState.dragging = true;
-        importState.dragOffX = mx - x;
-        importState.dragOffY = my - y;
-    }
-}
-
-function onImportMouseMove(e) {
-    if (!importState) return;
-    const rect = importOverlayCanvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-
-    // Update cursor
-    const handle = getHandle(mx, my);
-    if (handle) {
-        importOverlayCanvas.style.cursor = (handle === 'tl' || handle === 'br') ? 'nwse-resize' : 'nesw-resize';
-    } else {
-        const { x, y, w, h } = importState;
-        importOverlayCanvas.style.cursor = (mx >= x && mx <= x + w && my >= y && my <= y + h) ? 'move' : 'default';
-    }
-
-    if (importState.dragging) {
-        importState.x = mx - importState.dragOffX;
-        importState.y = my - importState.dragOffY;
-        drawImportOverlay();
-    } else if (importState.resizing) {
-        const lockAspect = !e.shiftKey;
-        resizeImport(mx, my, lockAspect);
-        drawImportOverlay();
-    }
-}
-
-function resizeImport(mx, my, lockAspect) {
+function onImportPointerDown(event) {
+    if (!importState || event.button !== 0 || event.isPrimary === false || importState.pointerId !== null) return;
+    const { x, y } = getCanvasPos(event);
+    const handle = getHandle(x, y);
     const s = importState;
-    const corner = s.resizeCorner;
-    let newX = s.x, newY = s.y, newW = s.w, newH = s.h;
-
-    if (corner === 'br') {
-        newW = Math.max(20, mx - s.x);
-        newH = Math.max(20, my - s.y);
-    } else if (corner === 'bl') {
-        newW = Math.max(20, (s.x + s.w) - mx);
-        newH = Math.max(20, my - s.y);
-        newX = mx;
-    } else if (corner === 'tr') {
-        newW = Math.max(20, mx - s.x);
-        newH = Math.max(20, (s.y + s.h) - my);
-        newY = my;
-    } else if (corner === 'tl') {
-        newW = Math.max(20, (s.x + s.w) - mx);
-        newH = Math.max(20, (s.y + s.h) - my);
-        newX = mx;
-        newY = my;
-    }
-
-    if (lockAspect) {
-        const aspect = s.originalAspect;
-        if (newW / newH > aspect) {
-            newW = Math.floor(newH * aspect);
-        } else {
-            newH = Math.floor(newW / aspect);
-        }
-    }
-
-    s.x = newX;
-    s.y = newY;
-    s.w = newW;
-    s.h = newH;
+    if (handle) {
+        s.resizing = true;
+        s.resizeCorner = handle;
+        s.resizeStart = { x: s.x, y: s.y, w: s.w, h: s.h, originalAspect: s.originalAspect };
+    } else if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) {
+        s.dragging = true;
+        s.dragOffX = x - s.x;
+        s.dragOffY = y - s.y;
+    } else return;
+    event.preventDefault();
+    s.pointerId = event.pointerId;
+    importOverlayCanvas.setPointerCapture(event.pointerId);
 }
 
-function onImportMouseUp() {
+function onImportPointerMove(event) {
     if (!importState) return;
+    const { x, y } = getCanvasPos(event);
+    const s = importState;
+    const handle = getHandle(x, y);
+    importOverlayCanvas.style.cursor = handle ?
+        ((handle === 'tl' || handle === 'br') ? 'nwse-resize' : 'nesw-resize') :
+        (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h ? 'move' : 'default');
+    if (event.pointerId !== s.pointerId) return;
+    event.preventDefault();
+    if (s.dragging) {
+        // Keep a small portion accessible for dragging back into view.
+        s.x = Math.max(10 - s.w, Math.min(canvas.width - 10, x - s.dragOffX));
+        s.y = Math.max(10 - s.h, Math.min(canvas.height - 10, y - s.dragOffY));
+    } else if (s.resizing) {
+        Object.assign(s, resizeImageFromCorner(s.resizeStart, s.resizeCorner, x, y, !event.shiftKey));
+    }
+    drawImportOverlay();
+}
+
+function onImportPointerUp(event) {
+    if (!importState || event.pointerId !== importState.pointerId) return;
+    const pointerId = importState.pointerId;
+    importState.pointerId = null;
     importState.dragging = false;
     importState.resizing = false;
     importState.resizeCorner = null;
+    if (importOverlayCanvas.hasPointerCapture(pointerId)) importOverlayCanvas.releasePointerCapture(pointerId);
 }
 
-function onImportKeyDown(e) {
-    if (e.key === 'Escape' && importState) {
-        const cb = importState.onCancel;
-        removeImportOverlay();
-        if (cb) cb();
-    }
+function onImportKeyDown(event) {
+    if (event.key === 'Escape') cancelImport();
+    if (event.key === 'Enter' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) confirmImport();
 }
 
 function drawImportOverlay() {
     if (!importOverlayCtx || !importState) return;
     const octx = importOverlayCtx;
     const { img, x, y, w, h } = importState;
-
-    octx.clearRect(0, 0, importOverlayCanvas.width, importOverlayCanvas.height);
-
-    // Semi-transparent background
+    const handle = handleSizeInDocument();
+    const scale = canvas.width / canvasContentRect().width;
+    octx.clearRect(0, 0, canvas.width, canvas.height);
     octx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-    octx.fillRect(0, 0, importOverlayCanvas.width, importOverlayCanvas.height);
+    octx.fillRect(0, 0, canvas.width, canvas.height);
     octx.clearRect(x, y, w, h);
-
-    // Draw image
     octx.drawImage(img, x, y, w, h);
-
-    // Draw border
-    octx.strokeStyle = '#00ff00';
-    octx.lineWidth = 2;
-    octx.setLineDash([6, 4]);
+    octx.strokeStyle = '#00a660';
+    octx.lineWidth = 2 * scale;
+    octx.setLineDash([6 * scale, 4 * scale]);
     octx.strokeRect(x, y, w, h);
     octx.setLineDash([]);
-
-    // Draw corner handles
-    octx.fillStyle = '#ff0000';
-    const corners = [
-        [x, y], [x + w, y], [x, y + h], [x + w, y + h]
-    ];
-    for (const [cx, cy] of corners) {
-        octx.fillRect(cx - HANDLE_SIZE / 2, cy - HANDLE_SIZE / 2, HANDLE_SIZE, HANDLE_SIZE);
+    octx.fillStyle = '#ffffff';
+    for (const [cx, cy] of [[x, y], [x + w, y], [x, y + h], [x + w, y + h]]) {
+        octx.fillRect(cx - handle / 2, cy - handle / 2, handle, handle);
+        octx.strokeRect(cx - handle / 2, cy - handle / 2, handle, handle);
     }
 }
 
@@ -425,16 +489,25 @@ export function confirmImport() {
     const { img, x, y, w, h, onConfirm } = importState;
     ctx.drawImage(img, x, y, w, h);
     removeImportOverlay();
-    if (onConfirm) onConfirm();
+    notifyCanvasChanged('import');
+    onConfirm?.();
 }
 
 export function cancelImport() {
-    if (!importState) return;
-    const cb = importState.onCancel;
-    removeImportOverlay();
-    if (cb) cb();
+    importGeneration++;
+    if (pendingImport) {
+        const { controller, onCancel } = pendingImport;
+        pendingImport = null;
+        controller.abort();
+        onCancel?.();
+    }
+    if (importState) {
+        const { onCancel } = importState;
+        removeImportOverlay();
+        onCancel?.();
+    }
 }
 
 export function isImporting() {
-    return importState !== null;
+    return importState !== null || pendingImport !== null;
 }

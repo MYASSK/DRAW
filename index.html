@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DRAW!</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="icon" href="pict/ic.png" type="image/png" sizes="32x32">
@@ -12,16 +12,17 @@
         <button id="startBtn">START</button>
     </div>
 
-    <div id="toolbar">
-        <div class="toolbar-section tools-section">
-            <span class="section-label">TOOLS</span>
-            <div class="tool-buttons">
-                <button class="tool-btn active" data-tool="brush" title="Brush">BRUSH</button>
-                <button class="tool-btn" data-tool="eraser" title="Eraser">ERASER</button>
-                <button class="tool-btn" data-tool="fill" title="Fill">FILL</button>
-            </div>
-        </div>
+    <nav id="document-bar" aria-label="工程文件">
+        <span class="document-brand">DRAW!</span>
+        <button class="document-btn" data-document-action="new" title="新建画布（Ctrl / ⌘ N）">新建</button>
+        <button class="document-btn" data-document-action="open" title="打开 .draw 工程（Ctrl / ⌘ O）">打开工程</button>
+        <button class="document-btn" data-document-action="save" title="保存工程（Ctrl / ⌘ S）">保存</button>
+        <button class="document-btn" data-document-action="saveAs" title="另存为（Ctrl / ⌘ Shift S）">另存为</button>
+        <button class="document-btn" data-document-action="export">导出 PNG</button>
+        <span id="documentName">未命名</span>
+    </nav>
 
+    <div id="toolbar">
         <div class="toolbar-section color-section">
             <span class="section-label">COLOR</span>
             <div class="color-palette" id="colorPalette"></div>
@@ -35,8 +36,8 @@
 
         <div class="toolbar-section size-section">
             <span class="section-label">SIZE</span>
-            <input type="range" id="sizeSlider" min="1" max="50" value="5">
-            <input type="number" id="sizeInput" min="1" max="50" value="5">
+            <input type="range" id="sizeSlider" min="1" max="50" value="5" aria-label="画笔大小">
+            <input type="number" id="sizeInput" min="1" max="50" value="5" aria-label="画笔大小数值">
             <div class="size-preview-wrapper">
                 <div class="size-preview" id="sizePreview"></div>
             </div>
@@ -48,7 +49,7 @@
         </div>
 
         <div class="logo-wrapper" id="logoWrapper">
-            <div class="logo-icon" id="logoIcon"></div>
+            <button class="logo-icon" id="logoIcon" aria-label="设置" title="设置"></button>
             <div class="settings-panel hidden" id="settingsPanel">
                 <div class="settings-titlebar">
                     <span>SETTINGS</span>
@@ -61,8 +62,8 @@
                     <button class="settings-theme-btn" data-theme="summer">Summer</button>
                     <div class="settings-label">BGM VOLUME</div>
                     <div class="settings-volume-row">
-                        <input type="range" id="bgmVolumeSlider" min="0" max="100" value="50">
-                        <span id="bgmVolumeValue">50%</span>
+                        <input type="range" id="bgmVolumeSlider" min="0" max="100" value="0" aria-label="背景音乐音量">
+                        <span id="bgmVolumeValue">0%</span>
                     </div>
                     <button class="settings-help-btn" id="settingsHelpBtn">HELP</button>
                     <button class="settings-about-btn" id="settingsAboutBtn">ABOUT</button>
@@ -108,6 +109,7 @@
         <div class="ai-loading-box">
             <div class="ai-spinner"></div>
             <p class="ai-loading-text" id="aiLoadingText">Working...</p>
+            <button class="document-btn" id="aiCancelBtn">取消</button>
         </div>
     </div>
 
@@ -124,7 +126,7 @@
             <button class="sidebar-btn sidebar-btn-yellow" id="redoBtn" title="Redo">REDO</button>
 
             <span class="sidebar-label">FILE</span>
-            <button class="sidebar-btn sidebar-btn-green" id="saveBtn" title="Save as PNG">SAVE</button>
+            <button class="sidebar-btn sidebar-btn-green" id="saveBtn" title="导出为 PNG 图片">PNG</button>
             <button class="sidebar-btn sidebar-btn-blue" id="importBtn" title="Import Image">IMPORT</button>
 
             <span class="sidebar-label">PROCESS</span>
@@ -136,9 +138,16 @@
             <button class="sidebar-btn sidebar-btn-cancel hidden" id="cancelImportBtn">CANCEL</button>
         </div>
         <div id="canvas-container">
-            <canvas id="drawCanvas"></canvas>
+            <canvas id="drawCanvas" aria-label="绘画画布"></canvas>
         </div>
     </div>
+
+    <footer id="status-bar" aria-label="文档状态">
+        <span id="appMode">DRAW!</span>
+        <span id="canvasDimensions">1280 × 720 px</span>
+        <span id="documentStatus" role="status" aria-live="polite">正在读取本地草稿…</span>
+        <span id="autosaveStatus">自动备份已就绪</span>
+    </footer>
 
     <script type="module" src="js/app.js"></script>
 </body>

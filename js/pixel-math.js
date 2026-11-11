@@ -1,6 +1,7 @@
 // pixel-math.js — Per-pixel RGB expression evaluator with dialog
 
-import { getCanvasCtx, saveState } from './canvas.js';
+import { getCanvasCtx, saveState, notifyCanvasChanged } from './canvas.js';
+import { compileExpression } from './math-expression.js';
 
 let dialogEl = null;
 let linked = true;
@@ -8,6 +9,8 @@ let lastFocusedInput = null;
 
 export function openPixelMathDialog() {
     if (dialogEl) return;
+    linked = true;
+    lastFocusedInput = null;
     dialogEl = buildDialog();
     document.body.appendChild(dialogEl);
 }
@@ -16,6 +19,7 @@ export function closePixelMathDialog() {
     if (dialogEl) {
         dialogEl.remove();
         dialogEl = null;
+        lastFocusedInput = null;
     }
 }
 
@@ -244,33 +248,23 @@ function applyPixelMath() {
         return;
     }
 
-    let fnR, fnG, fnB;
     try {
-        fnR = new Function('x', 'return ' + exprR);
-        fnG = new Function('x', 'return ' + exprG);
-        fnB = new Function('x', 'return ' + exprB);
-        // Test with a sample value
-        fnR(128); fnG(128); fnB(128);
-    } catch (e) {
-        status.textContent = 'ERROR: Invalid expression — ' + e.message;
-        return;
+        const functions = [exprR, exprG, exprB].map(compileExpression);
+        const { ctx, canvas } = getCanvasCtx();
+        // Work on a detached copy; failed expressions leave pixels and history intact.
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        const clamp = value => Math.min(255, Math.max(0, Math.round(value)));
+        for (let i = 0; i < data.length; i += 4) {
+            for (let channel = 0; channel < 3; channel++) {
+                data[i + channel] = clamp(functions[channel](data[i + channel]));
+            }
+        }
+        saveState();
+        ctx.putImageData(imageData, 0, 0);
+        notifyCanvasChanged('pixel-math');
+        status.textContent = 'Done! R: ' + exprR + ' | G: ' + exprG + ' | B: ' + exprB;
+    } catch (error) {
+        status.textContent = 'ERROR: ' + error.message;
     }
-
-    const { ctx, canvas } = getCanvasCtx();
-    saveState();
-
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-
-    const clamp = (v) => Math.min(255, Math.max(0, Math.round(v)));
-
-    for (let i = 0; i < data.length; i += 4) {
-        data[i]     = clamp(fnR(data[i]));
-        data[i + 1] = clamp(fnG(data[i + 1]));
-        data[i + 2] = clamp(fnB(data[i + 2]));
-        // Alpha unchanged
-    }
-
-    ctx.putImageData(imageData, 0, 0);
-    status.textContent = 'Done! R: ' + exprR + ' | G: ' + exprG + ' | B: ' + exprB;
 }

@@ -1,7 +1,8 @@
 // toolbar.js — Toolbar UI, color palette, and mode switching
 
-import { state, clearCanvas, undo, redo, saveCanvasAsFile, startImageImport, confirmImport, cancelImport, isImporting, getCanvasCtx, saveState } from './canvas.js';
-import { initAITools, autoColor, finishDrawing, textToDrawing, styleTransfer } from './ai-tools.js';
+import { state, clearCanvas, undo, redo, startImageImport, confirmImport, cancelImport, isImporting, getCanvasCtx, saveState, notifyCanvasChanged } from './canvas.js';
+import { initAITools, autoColor, finishDrawing, textToDrawing, styleTransfer, cancelAI } from './ai-tools.js';
+import { exportProjectPng } from './project.js';
 import { getApiKey, setApiKey, validateApiKey } from './ai-api.js';
 import { extractLines } from './filters.js';
 import { openFilterDialog } from './filter-dialog.js';
@@ -255,6 +256,7 @@ function clamp(val, min, max) {
 function bindAITools() {
     const overlay = document.getElementById('ai-loading-overlay');
     const loadingText = document.getElementById('aiLoadingText');
+    document.getElementById('aiCancelBtn').addEventListener('click', cancelAI);
 
     initAITools(
         (show) => {
@@ -330,7 +332,7 @@ function bindSidebar() {
 
     // Save button
     document.getElementById('saveBtn').addEventListener('click', () => {
-        saveCanvasAsFile();
+        exportProjectPng();
     });
 
     // Import button
@@ -344,21 +346,23 @@ function bindSidebar() {
         fileInput.click();
     });
 
-    fileInput.addEventListener('change', () => {
+    fileInput.addEventListener('change', async () => {
         const file = fileInput.files[0];
         if (!file) return;
-        // Show confirm/cancel buttons
-        confirmBtn.classList.remove('hidden');
-        cancelBtn.classList.remove('hidden');
-        startImageImport(file, () => {
+        const imported = await startImageImport(file, () => {
             // On confirm
             confirmBtn.classList.add('hidden');
             cancelBtn.classList.add('hidden');
-        }, () => {
+        }, (error) => {
             // On cancel
             confirmBtn.classList.add('hidden');
             cancelBtn.classList.add('hidden');
+            if (error) alert('图片导入失败：' + (error.message || error));
         });
+        if (imported) {
+            confirmBtn.classList.remove('hidden');
+            cancelBtn.classList.remove('hidden');
+        }
         // Reset file input so same file can be imported again
         fileInput.value = '';
     });
@@ -374,10 +378,11 @@ function bindSidebar() {
     // Extract lines button
     document.getElementById('extractBtn').addEventListener('click', () => {
         const { ctx, canvas } = getCanvasCtx();
-        saveState();
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         const result = extractLines(imageData);
+        saveState();
         ctx.putImageData(result, 0, 0);
+        notifyCanvasChanged('extract');
     });
 
     // Filter dialog button
